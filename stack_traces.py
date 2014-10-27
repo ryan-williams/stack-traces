@@ -75,16 +75,20 @@ def exists(pred, l):
     return False
 
 
-stack_trace_line_regexs = [
+stack_trace_start_regexs = [
+    r'^\s+at .*?\n',
+]
+
+during_stack_trace_line_regexs = [
     r'^Exception.*?\n',
     r'^Caused by:.*?\n',
-    r'^\s+at .*?\n',
-    r'^\s+\.{3} [0-9]+ more\n',
+    r'^\s+.*?\n',
+    r'^Driver stacktrace:$',
 ]
 
 
-def is_stack_trace_line(line):
-    return exists(lambda r: re.match(r, line), stack_trace_line_regexs)
+def is_during_stack_trace_line(line):
+    return exists(lambda r: re.match(r, line), during_stack_trace_line_regexs)
 
 
 prev_lines = deque()
@@ -98,10 +102,17 @@ def push_prev_line(line):
 class StackTrace:
 
     def __init__(self, pre_lines, num_post_lines=args.after_context):
-        self.pre_lines = pre_lines
         self.num_post_lines = num_post_lines
 
-        self.lines = []
+        transfer_from_idx = len(pre_lines)
+        while True:
+            transfer_from_idx -= 1
+
+            if transfer_from_idx < 0 or not is_during_stack_trace_line(pre_lines[transfer_from_idx]):
+                break
+
+        self.pre_lines = pre_lines[:transfer_from_idx]
+        self.lines = pre_lines[transfer_from_idx:]
         self.post_lines = []
 
         self._stack_str = None
@@ -147,13 +158,13 @@ def streaming_stack_traces():
     for line in fileinput.input():
         line_no += 1
         if not cur_stack_trace:
-            if is_stack_trace_line(line):
+            if exists(lambda r: re.match(r, line), stack_trace_start_regexs):
                 cur_stack_trace = StackTrace(list(prev_lines)).add(line)
                 prev_lines.clear()
             else:
                 push_prev_line(line)
         else:
-            if is_stack_trace_line(line):
+            if is_during_stack_trace_line(line):
                 cur_stack_trace += line
             else:
                 push_prev_line(line)
@@ -172,9 +183,10 @@ if __name__ == '__main__':
         stack_traces = {}
 
         for stack_trace in streaming_stack_traces():
-            if stack_trace not in stack_traces:
-                stack_traces[stack_trace] = 0
-            stack_traces[stack_trace] += 1
+            stack_trace_str = str(stack_trace)
+            if stack_trace_str not in stack_traces:
+                stack_traces[stack_trace_str] = 0
+            stack_traces[stack_trace_str] += 1
 
         sorted_stacks_and_counts = sorted(stack_traces.iteritems(), key=lambda x: x[1], reverse=args.descending)
 
