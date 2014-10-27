@@ -9,14 +9,14 @@ import sys
 
 parser = argparse.ArgumentParser()
 parser.add_argument(
-    '-a', '-A', '--after', '--after-context',
+    '-a', '--after', '--after-context',
     dest='after_context',
     type=int,
     help="Number of lines of context to print after each stack trace",
     default=0
 )
 parser.add_argument(
-    '-b', '-B', '--before', '--before-context',
+    '-b', '--before', '--before-context',
     dest='before_context',
     type=int,
     help="Number of lines of context to print before each stack trace",
@@ -55,6 +55,38 @@ parser.add_argument(
     type=int,
     help="Maximum number of stack traces to output",
     default=-1
+)
+
+parser.add_argument(
+    '-A', '--aggregate-after-lines',
+    dest='aggregate_after',
+    action="store_true",
+    help="Whether to include the [after-context] lines in the uniqueness check when counting stack-trace occurrences. Requires '-h or '-d'.",
+    default=False
+)
+
+parser.add_argument(
+    '-B', '--aggregate-before-lines',
+    dest='aggregate_before',
+    action="store_true",
+    help="Whether to include the [before-context] lines in the uniqueness check when counting stack-trace occurrences. Requires '-h or '-d'.",
+    default=False
+)
+
+parser.add_argument(
+    '-s', '--strip-datetimes', '--sd',
+    dest='strip_datetimes',
+    action='store_true',
+    help="Whether to strip datetimes from after- and before-context lines, to more correctly collapse identical stack-traces/context-lines when counting.",
+    default=False
+)
+
+parser.add_argument(
+    '--strip-numbers', '--sn',
+    dest='strip_numbers',
+    action='store_true',
+    help="Whether to strip all numbers from after- and before-context lines, to more correctly collapse identical stack-traces/context-lines when counting.",
+    default=False
 )
 
 args, unparsed_args = parser.parse_known_args()
@@ -101,8 +133,14 @@ def push_prev_line(line):
 
 class StackTrace:
 
-    def __init__(self, pre_lines, num_post_lines=args.after_context):
-        self.num_post_lines = num_post_lines
+    def __init__(self, pre_lines):
+
+        self.num_post_lines = args.after_context
+
+        self.include_pre_lines_in_key = args.aggregate_before
+        self.include_post_lines_in_key = args.aggregate_after
+        self.strip_datetimes_from_key = args.strip_datetimes
+        self.strip_numbers_from_key = args.strip_numbers
 
         transfer_from_idx = len(pre_lines)
         while True:
@@ -136,7 +174,22 @@ class StackTrace:
 
     def stack_str(self):
         if not self._stack_str:
-            self._stack_str = ''.join(self.lines)
+            self._stack_str = ''.join(
+                (self.pre_lines if self.include_pre_lines_in_key else []) +
+                self.lines +
+                (self.post_lines if self.include_post_lines_in_key else [])
+            )
+
+            if self.strip_datetimes_from_key:
+                self._stack_str = re.sub(
+                    r'[0-9]{2}/[0-9]{2}/[0-9]{2}.[0-9]{2}:[0-9]{2}:[0-9]{2}',
+                    'XX/XX/XX XX:XX:XX',
+                    self._stack_str
+                )
+
+            if self.strip_numbers_from_key:
+                self._stack_str = re.sub(r'[0-9]+', 'X', self._stack_str)
+
         return self._stack_str
 
 
@@ -183,19 +236,19 @@ if __name__ == '__main__':
         stack_traces = {}
 
         for stack_trace in streaming_stack_traces():
-            stack_trace_str = str(stack_trace)
+            stack_trace_str = stack_trace.stack_str()
             if stack_trace_str not in stack_traces:
-                stack_traces[stack_trace_str] = 0
-            stack_traces[stack_trace_str] += 1
+                stack_traces[stack_trace_str] = []
+            stack_traces[stack_trace_str].append(stack_trace)
 
-        sorted_stacks_and_counts = sorted(stack_traces.iteritems(), key=lambda x: x[1], reverse=args.descending)
+        sorted_stacks_and_counts = sorted(stack_traces.iteritems(), key=lambda x: len(x[1]), reverse=args.descending)
 
         if args.max_num >= 0:
             sorted_stacks_and_counts = sorted_stacks_and_counts[:args.max_num]
 
         print '%d stacks in total\n' % total_num_stacks
-        for stack_trace, count in sorted_stacks_and_counts:
-            print '%d occurrences:\n%s' % (count, stack_trace)
+        for stack_trace_str, stack_traces in sorted_stacks_and_counts:
+            print '%d occurrences:\n%s' % (len(stack_traces), str(stack_traces[0]))
 
     else:
         stack_traces = streaming_stack_traces()
