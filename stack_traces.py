@@ -153,6 +153,7 @@ class StackTrace:
         self.lines = pre_lines[transfer_from_idx:]
         self.post_lines = []
 
+        self.is_post_stack = False
         self._stack_str = None
 
 
@@ -190,6 +191,8 @@ class StackTrace:
             if self.strip_numbers_from_key:
                 self._stack_str = re.sub(r'[0-9]+', 'X', self._stack_str)
 
+            #print '\n***\n%s\n***\n' % self._stack_str
+
         return self._stack_str
 
 
@@ -218,13 +221,21 @@ def streaming_stack_traces():
                 push_prev_line(line)
         else:
             if is_during_stack_trace_line(line):
-                cur_stack_trace += line
+                if cur_stack_trace.is_post_stack:
+                    total_num_stacks += 1
+                    yield cur_stack_trace
+                    cur_stack_trace = StackTrace(list(prev_lines)).add(line)
+                    prev_lines.clear()
+                else:
+                    cur_stack_trace += line
             else:
                 push_prev_line(line)
+                cur_stack_trace.is_post_stack = True
                 if not cur_stack_trace.add_post_line(line):
                     total_num_stacks += 1
                     yield cur_stack_trace
                     cur_stack_trace = None
+
     if cur_stack_trace:
         total_num_stacks += 1
         yield cur_stack_trace
