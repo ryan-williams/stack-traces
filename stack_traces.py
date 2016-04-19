@@ -262,7 +262,7 @@ if __name__ == '__main__':
             print '%d occurrences:\n%s' % (len(stack_traces), str(stack_traces[0]))
 
     else:
-        stack_traces = streaming_stack_traces()
+        stack_traces = list(streaming_stack_traces())
 
         if args.max_num >= 0:
             stack_traces = stack_traces[:args.max_num]
